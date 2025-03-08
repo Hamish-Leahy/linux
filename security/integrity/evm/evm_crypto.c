@@ -119,6 +119,8 @@ static struct shash_desc *init_desc(char type, uint8_t hash_algo)
 		}
 	}
 
+// Make New Configs - Update Security Standards
+
 alloc:
 	desc = kmalloc(sizeof(*desc) + crypto_shash_descsize(*tfm), GFP_KERNEL);
 	if (!desc) {
