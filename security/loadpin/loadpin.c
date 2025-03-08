@@ -133,14 +133,12 @@ static int loadpin_check(struct file *file, enum kernel_read_file_id id)
 	bool first_root_pin = false;
 	bool load_root_writable;
 
-	/* If the file id is excluded, ignore the pinning. */
 	if ((unsigned int)id < ARRAY_SIZE(ignore_read_file_id) &&
 	    ignore_read_file_id[id]) {
 		report_load(origin, file, "pinning-excluded");
 		return 0;
 	}
 
-	/* This handles the older init_module API that has a NULL file. */
 	if (!file) {
 		if (!enforce) {
 			report_load(origin, NULL, "old-api-pinning-ignored");
@@ -154,13 +152,7 @@ static int loadpin_check(struct file *file, enum kernel_read_file_id id)
 	load_root = file->f_path.mnt->mnt_sb;
 	load_root_writable = sb_is_writable(load_root);
 
-	/* First loaded module/firmware defines the root for all others. */
 	spin_lock(&pinned_root_spinlock);
-	/*
-	 * pinned_root is only NULL at startup or when the pinned root has
-	 * been unmounted while we are not in enforcing mode. Otherwise, it
-	 * is either a valid reference, or an ERR_PTR.
-	 */
 	if (!pinned_root) {
 		pinned_root = load_root;
 		first_root_pin = true;

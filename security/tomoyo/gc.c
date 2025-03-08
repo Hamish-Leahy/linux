@@ -8,6 +8,10 @@
 #include "common.h"
 #include <linux/kthread.h>
 #include <linux/slab.h>
+#include <linux/list.h>
+#include <linux/spinlock.h>
+
+#define GC_BATCH_SIZE 64
 
 /**
  * tomoyo_memory_free - Free memory for elements.

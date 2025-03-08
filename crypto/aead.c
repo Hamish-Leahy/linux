@@ -30,8 +30,10 @@ static int setkey_unaligned(struct crypto_aead *tfm, const u8 *key,
 
 	absize = keylen + alignmask;
 	buffer = kmalloc(absize, GFP_ATOMIC);
-	if (!buffer)
+	if (!buffer) {
+		pr_err("Failed to allocate memory for key buffer\n");
 		return -ENOMEM;
+	}
 
 	alignbuffer = (u8 *)ALIGN((unsigned long)buffer, alignmask + 1);
 	memcpy(alignbuffer, key, keylen);
@@ -52,6 +54,7 @@ int crypto_aead_setkey(struct crypto_aead *tfm,
 		err = crypto_aead_alg(tfm)->setkey(tfm, key, keylen);
 
 	if (unlikely(err)) {
+		pr_err("Failed to set key for AEAD algorithm\n");
 		crypto_aead_set_flags(tfm, CRYPTO_TFM_NEED_KEY);
 		return err;
 	}

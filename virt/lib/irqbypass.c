@@ -26,7 +26,7 @@ static LIST_HEAD(producers);
 static LIST_HEAD(consumers);
 static DEFINE_MUTEX(lock);
 
-/* @lock must be held when calling connect */
+/* Connect a producer and a consumer */
 static int __connect(struct irq_bypass_producer *prod,
 		     struct irq_bypass_consumer *cons)
 {
@@ -37,14 +37,15 @@ static int __connect(struct irq_bypass_producer *prod,
 	if (cons->stop)
 		cons->stop(cons);
 
-	if (prod->add_consumer)
+	if (prod->add_consumer) {
 		ret = prod->add_consumer(prod, cons);
-
-	if (!ret) {
-		ret = cons->add_producer(cons, prod);
-		if (ret && prod->del_consumer)
-			prod->del_consumer(prod, cons);
+		if (ret)
+			return ret;
 	}
+
+	ret = cons->add_producer(cons, prod);
+	if (ret && prod->del_consumer)
+		prod->del_consumer(prod, cons);
 
 	if (cons->start)
 		cons->start(cons);
@@ -54,7 +55,7 @@ static int __connect(struct irq_bypass_producer *prod,
 	return ret;
 }
 
-/* @lock must be held when calling disconnect */
+/* Disconnect a producer and a consumer */
 static void __disconnect(struct irq_bypass_producer *prod,
 			 struct irq_bypass_consumer *cons)
 {
@@ -64,7 +65,6 @@ static void __disconnect(struct irq_bypass_producer *prod,
 		cons->stop(cons);
 
 	cons->del_producer(cons, prod);
-
 	if (prod->del_consumer)
 		prod->del_consumer(prod, cons);
 
@@ -75,11 +75,10 @@ static void __disconnect(struct irq_bypass_producer *prod,
 }
 
 /**
- * irq_bypass_register_producer - register IRQ bypass producer
- * @producer: pointer to producer structure
+ * irq_bypass_register_producer - Register an IRQ bypass producer
+ * @producer: Pointer to producer structure
  *
- * Add the provided IRQ producer to the list of producers and connect
- * with any matching token found on the IRQ consumers list.
+ * Returns 0 on success, or a negative error code on failure.
  */
 int irq_bypass_register_producer(struct irq_bypass_producer *producer)
 {
@@ -114,10 +113,9 @@ int irq_bypass_register_producer(struct irq_bypass_producer *producer)
 	}
 
 	list_add(&producer->node, &producers);
-
 	mutex_unlock(&lock);
-
 	return 0;
+
 out_err:
 	mutex_unlock(&lock);
 	module_put(THIS_MODULE);
@@ -126,11 +124,10 @@ out_err:
 EXPORT_SYMBOL_GPL(irq_bypass_register_producer);
 
 /**
- * irq_bypass_unregister_producer - unregister IRQ bypass producer
- * @producer: pointer to producer structure
+ * irq_bypass_unregister_producer - Unregister an IRQ bypass producer
+ * @producer: Pointer to producer structure
  *
- * Remove a previously registered IRQ producer from the list of producers
- * and disconnect it from any connected IRQ consumer.
+ * Returns nothing.
  */
 void irq_bypass_unregister_producer(struct irq_bypass_producer *producer)
 {
@@ -164,17 +161,15 @@ void irq_bypass_unregister_producer(struct irq_bypass_producer *producer)
 	}
 
 	mutex_unlock(&lock);
-
 	module_put(THIS_MODULE);
 }
 EXPORT_SYMBOL_GPL(irq_bypass_unregister_producer);
 
 /**
- * irq_bypass_register_consumer - register IRQ bypass consumer
- * @consumer: pointer to consumer structure
+ * irq_bypass_register_consumer - Register an IRQ bypass consumer
+ * @consumer: Pointer to consumer structure
  *
- * Add the provided IRQ consumer to the list of consumers and connect
- * with any matching token found on the IRQ producer list.
+ * Returns 0 on success, or a negative error code on failure.
  */
 int irq_bypass_register_consumer(struct irq_bypass_consumer *consumer)
 {
@@ -182,8 +177,7 @@ int irq_bypass_register_consumer(struct irq_bypass_consumer *consumer)
 	struct irq_bypass_producer *producer;
 	int ret;
 
-	if (!consumer->token ||
-	    !consumer->add_producer || !consumer->del_producer)
+	if (!consumer->token || !consumer->add_producer || !consumer->del_producer)
 		return -EINVAL;
 
 	might_sleep();
@@ -210,10 +204,9 @@ int irq_bypass_register_consumer(struct irq_bypass_consumer *consumer)
 	}
 
 	list_add(&consumer->node, &consumers);
-
 	mutex_unlock(&lock);
-
 	return 0;
+
 out_err:
 	mutex_unlock(&lock);
 	module_put(THIS_MODULE);
@@ -222,11 +215,10 @@ out_err:
 EXPORT_SYMBOL_GPL(irq_bypass_register_consumer);
 
 /**
- * irq_bypass_unregister_consumer - unregister IRQ bypass consumer
- * @consumer: pointer to consumer structure
+ * irq_bypass_unregister_consumer - Unregister an IRQ bypass consumer
+ * @consumer: Pointer to consumer structure
  *
- * Remove a previously registered IRQ consumer from the list of consumers
- * and disconnect it from any connected IRQ producer.
+ * Returns nothing.
  */
 void irq_bypass_unregister_consumer(struct irq_bypass_consumer *consumer)
 {
@@ -260,7 +252,6 @@ void irq_bypass_unregister_consumer(struct irq_bypass_consumer *consumer)
 	}
 
 	mutex_unlock(&lock);
-
 	module_put(THIS_MODULE);
 }
 EXPORT_SYMBOL_GPL(irq_bypass_unregister_consumer);

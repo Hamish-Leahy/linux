@@ -14,6 +14,9 @@
 #include <linux/notifier.h>
 #include <linux/string_choices.h>
 #include <generated/utsrelease.h>
+#include <linux/fs.h>
+#include <linux/kobject.h>
+#include <linux/string.h>
 
 int fips_enabled;
 EXPORT_SYMBOL_GPL(fips_enabled);
@@ -84,15 +87,50 @@ void fips_fail_notify(void)
 }
 EXPORT_SYMBOL_GPL(fips_fail_notify);
 
+static ssize_t fips_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", fips_enabled);
+}
+
+static ssize_t fips_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+{
+	int new_fips_enabled;
+
+	if (sscanf(buf, "%d", &new_fips_enabled) != 1)
+		return -EINVAL;
+
+	if (new_fips_enabled != 0 && new_fips_enabled != 1)
+		return -EINVAL;
+
+	fips_enabled = new_fips_enabled;
+	pr_info("FIPS mode toggled: %s\n", str_enabled_disabled(fips_enabled));
+	return count;
+}
+
+static struct kobj_attribute fips_attribute = __ATTR(fips_enabled, 0664, fips_show, fips_store);
+
 static int __init fips_init(void)
 {
+	int ret;
+
 	crypto_proc_fips_init();
+
+	// Create a sysfs entry for FIPS mode
+	ret = sysfs_create_file(kernel_kobj, &fips_attribute.attr);
+	if (ret) {
+		pr_err("Failed to create sysfs entry for fips_enabled\n");
+		return ret;
+	}
+
 	return 0;
 }
 
 static void __exit fips_exit(void)
 {
 	crypto_proc_fips_exit();
+
+	// Remove the sysfs entry for FIPS mode
+	sysfs_remove_file(kernel_kobj, &fips_attribute.attr);
 }
 
 subsys_initcall(fips_init);
