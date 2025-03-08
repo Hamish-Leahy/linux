@@ -29,7 +29,7 @@ static const int evmkey_len = MAX_KEY_SIZE;
 static struct crypto_shash *hmac_tfm;
 static struct crypto_shash *evm_tfm[HASH_ALGO__LAST];
 
-static DEFINE_MUTEX(mutex);
+static DEFINE_MUTEX(evm_mutex);
 
 #define EVM_SET_KEY_BUSY 0
 
@@ -38,45 +38,46 @@ static unsigned long evm_set_key_flags;
 static const char evm_hmac[] = "hmac(sha1)";
 
 /**
- * evm_set_key() - set EVM HMAC key from the kernel
- * @key: pointer to a buffer with the key data
- * @keylen: length of the key data
+ * evm_set_key - Set the EVM HMAC key from the kernel
+ * @key: Pointer to a buffer with the key data
+ * @keylen: Length of the key data
  *
- * This function allows setting the EVM HMAC key from the kernel
- * without using the "encrypted" key subsystem keys. It can be used
- * by the crypto HW kernel module which has its own way of managing
- * keys.
+ * This function sets the EVM HMAC key from the kernel without using the
+ * "encrypted" key subsystem keys. It can be used by the crypto HW kernel
+ * module which has its own way of managing keys.
  *
- * key length should be between 32 and 128 bytes long
+ * Returns 0 on success, or a negative error code on failure.
  */
 int evm_set_key(void *key, size_t keylen)
 {
-	int rc;
-
-	rc = -EBUSY;
 	if (test_and_set_bit(EVM_SET_KEY_BUSY, &evm_set_key_flags))
-		goto busy;
-	rc = -EINVAL;
-	if (keylen > MAX_KEY_SIZE)
-		goto inval;
+		return -EBUSY;
+
+	if (keylen > MAX_KEY_SIZE) {
+		clear_bit(EVM_SET_KEY_BUSY, &evm_set_key_flags);
+		return -EINVAL;
+	}
+
 	memcpy(evmkey, key, keylen);
 	evm_initialized |= EVM_INIT_HMAC;
-	pr_info("key initialized\n");
+	pr_info("EVM key initialized\n");
+
 	return 0;
-inval:
-	clear_bit(EVM_SET_KEY_BUSY, &evm_set_key_flags);
-busy:
-	pr_err("key initialization failed\n");
-	return rc;
 }
 EXPORT_SYMBOL_GPL(evm_set_key);
 
+/**
+ * init_desc - Initialize a hash descriptor
+ * @type: Type of the hash (HMAC or other)
+ * @hash_algo: Hash algorithm to use
+ *
+ * Returns a pointer to the initialized shash descriptor or an error pointer.
+ */
 static struct shash_desc *init_desc(char type, uint8_t hash_algo)
 {
-	long rc;
-	const char *algo;
-	struct crypto_shash **tfm, *tmp_tfm;
 	struct shash_desc *desc;
+	struct crypto_shash **tfm;
+	const char *algo;
 
 	if (type == EVM_XATTR_HMAC) {
 		if (!(evm_initialized & EVM_INIT_HMAC)) {
@@ -95,41 +96,45 @@ static struct shash_desc *init_desc(char type, uint8_t hash_algo)
 
 	if (*tfm)
 		goto alloc;
-	mutex_lock(&mutex);
-	if (*tfm)
-		goto unlock;
 
-	tmp_tfm = crypto_alloc_shash(algo, 0, CRYPTO_NOLOAD);
-	if (IS_ERR(tmp_tfm)) {
-		pr_err("Can not allocate %s (reason: %ld)\n", algo,
-		       PTR_ERR(tmp_tfm));
-		mutex_unlock(&mutex);
-		return ERR_CAST(tmp_tfm);
+	mutex_lock(&evm_mutex);
+	if (*tfm) {
+		mutex_unlock(&evm_mutex);
+		goto alloc;
 	}
+
+	*tfm = crypto_alloc_shash(algo, 0, CRYPTO_NOLOAD);
+	if (IS_ERR(*tfm)) {
+		pr_err("Cannot allocate %s (reason: %ld)\n", algo, PTR_ERR(*tfm));
+		mutex_unlock(&evm_mutex);
+		return ERR_CAST(*tfm);
+	}
+
 	if (type == EVM_XATTR_HMAC) {
-		rc = crypto_shash_setkey(tmp_tfm, evmkey, evmkey_len);
+		int rc = crypto_shash_setkey(*tfm, evmkey, evmkey_len);
 		if (rc) {
-			crypto_free_shash(tmp_tfm);
-			mutex_unlock(&mutex);
+			crypto_free_shash(*tfm);
+			mutex_unlock(&evm_mutex);
 			return ERR_PTR(rc);
 		}
 	}
-	*tfm = tmp_tfm;
-unlock:
-	mutex_unlock(&mutex);
+
 alloc:
-	desc = kmalloc(sizeof(*desc) + crypto_shash_descsize(*tfm),
-			GFP_KERNEL);
-	if (!desc)
+	desc = kmalloc(sizeof(*desc) + crypto_shash_descsize(*tfm), GFP_KERNEL);
+	if (!desc) {
+		mutex_unlock(&evm_mutex);
 		return ERR_PTR(-ENOMEM);
+	}
 
 	desc->tfm = *tfm;
-
-	rc = crypto_shash_init(desc);
+	int rc = crypto_shash_init(desc);
 	if (rc) {
 		kfree(desc);
+		mutex_unlock(&evm_mutex);
 		return ERR_PTR(rc);
 	}
+
+	mutex_unlock(&evm_mutex);
 	return desc;
 }
 
@@ -175,7 +180,7 @@ static void hmac_add_misc(struct shash_desc *desc, struct inode *inode,
 		crypto_shash_update(desc, (u8 *)&inode->i_sb->s_uuid, UUID_SIZE);
 	crypto_shash_final(desc, digest);
 
-	pr_debug("hmac_misc: (%zu) [%*phN]\n", sizeof(struct h_misc),
+	pr_debug("HMAC Misc: (%zu) [%*phN]\n", sizeof(struct h_misc),
 		 (int)sizeof(struct h_misc), &hmac_misc);
 }
 
@@ -312,6 +317,17 @@ out:
 	return error;
 }
 
+/**
+ * evm_calc_hmac - Calculate the HMAC for the given parameters
+ * @dentry: Pointer to the dentry
+ * @req_xattr_name: Requested xattr name
+ * @req_xattr_value: Requested xattr value
+ * @req_xattr_value_len: Length of the requested xattr value
+ * @data: Pointer to the evm_digest structure
+ * @iint: Pointer to the evm_iint_cache structure
+ *
+ * Returns 0 on success or a negative error code on failure.
+ */
 int evm_calc_hmac(struct dentry *dentry, const char *req_xattr_name,
 		  const char *req_xattr_value, size_t req_xattr_value_len,
 		  struct evm_digest *data, struct evm_iint_cache *iint)
@@ -420,8 +436,10 @@ int evm_init_hmac(struct inode *inode, const struct xattr *xattrs,
 	return 0;
 }
 
-/*
- * Get the key from the TPM for the SHA1-HMAC
+/**
+ * evm_init_key - Initialize the EVM key from the TPM
+ *
+ * Returns 0 on success or a negative error code on failure.
  */
 int evm_init_key(void)
 {
@@ -438,7 +456,7 @@ int evm_init_key(void)
 
 	rc = evm_set_key(ekp->decrypted_data, ekp->decrypted_datalen);
 
-	/* burn the original key contents */
+	/* Clear the original key contents for security */
 	memset(ekp->decrypted_data, 0, ekp->decrypted_datalen);
 	up_read(&evm_key->sem);
 	key_put(evm_key);

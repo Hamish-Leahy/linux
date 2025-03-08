@@ -18,6 +18,8 @@
 #include <asm/io.h>
 #include <asm/byteorder.h>
 #include <linux/uaccess.h>
+#include <linux/list.h>
+#include <linux/mutex.h>
 
 #include <linux/atmdev.h>
 #include <linux/atm.h>
@@ -40,6 +42,7 @@ struct adummy_dev {
 /* globals */
 
 static LIST_HEAD(adummy_devs);
+static DEFINE_MUTEX(adummy_mutex);
 
 static ssize_t __set_signal(struct device *dev,
 		struct device_attribute *attr,
@@ -140,6 +143,33 @@ static const struct atmdev_ops adummy_ops =
 	.owner =	THIS_MODULE
 };
 
+/* Function to add a new entry to the dummy list */
+static void add_dummy_entry(struct adummy_dev *adummy_dev) {
+	mutex_lock(&adummy_mutex);
+	list_add(&adummy_dev->entry, &adummy_devs);
+	mutex_unlock(&adummy_mutex);
+	pr_info("Added entry for %s\n", dev_name(&adummy_dev->atm_dev->class_dev));
+}
+
+/* Function to remove an entry from the dummy list */
+static void remove_dummy_entry(struct adummy_dev *adummy_dev) {
+	mutex_lock(&adummy_mutex);
+	list_del(&adummy_dev->entry);
+	mutex_unlock(&adummy_mutex);
+	pr_info("Removed entry for %s\n", dev_name(&adummy_dev->atm_dev->class_dev));
+}
+
+/* Function to display all entries in the dummy list */
+static void display_dummy_entries(void) {
+	struct adummy_dev *adummy_dev;
+
+	mutex_lock(&adummy_mutex);
+	list_for_each_entry(adummy_dev, &adummy_devs, entry) {
+		pr_info("Entry for %s\n", dev_name(&adummy_dev->atm_dev->class_dev));
+	}
+	mutex_unlock(&adummy_mutex);
+}
+
 static int __init adummy_init(void)
 {
 	struct atm_dev *atm_dev;
@@ -174,25 +204,30 @@ static int __init adummy_init(void)
 		goto out_unregister;
 	}
 
-	list_add(&adummy_dev->entry, &adummy_devs);
-out:
-	return err;
+	add_dummy_entry(adummy_dev);
+
+	return 0;
 
 out_unregister:
 	atm_dev_deregister(atm_dev);
 out_kfree:
 	kfree(adummy_dev);
-	goto out;
+out:
+	return err;
 }
 
 static void __exit adummy_cleanup(void)
 {
 	struct adummy_dev *adummy_dev, *next;
 
+	mutex_lock(&adummy_mutex);
 	list_for_each_entry_safe(adummy_dev, next, &adummy_devs, entry) {
 		atm_dev_deregister(adummy_dev->atm_dev);
-		kfree(adummy_dev);
+		remove_dummy_entry(adummy_dev);
 	}
+	mutex_unlock(&adummy_mutex);
+
+	display_dummy_entries();
 }
 
 module_init(adummy_init);

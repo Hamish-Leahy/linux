@@ -4,12 +4,14 @@
 #define __KVM_MM_H__ 1
 
 /*
- * Architectures can choose whether to use an rwlock or spinlock
- * for the mmu_lock.  These macros, for use in common code
- * only, avoids using #ifdefs in places that must deal with
- * multiple architectures.
+ * KVM Memory Management Header
+ *
+ * This header file defines the memory management structures and functions
+ * used by the KVM (Kernel-based Virtual Machine) subsystem. It provides
+ * an interface for managing memory slots and page frame numbers (PFNs).
  */
 
+/* Locking mechanism for MMU operations */
 #ifdef KVM_HAVE_MMU_RWLOCK
 #define KVM_MMU_LOCK_INIT(kvm)		rwlock_init(&(kvm)->mmu_lock)
 #define KVM_MMU_LOCK(kvm)		write_lock(&(kvm)->mmu_lock)
@@ -20,20 +22,19 @@
 #define KVM_MMU_UNLOCK(kvm)		spin_unlock(&(kvm)->mmu_lock)
 #endif /* KVM_HAVE_MMU_RWLOCK */
 
-
+/* Structure for following page frame numbers */
 struct kvm_follow_pfn {
-	const struct kvm_memory_slot *slot;
-	const gfn_t gfn;
+	const struct kvm_memory_slot *slot; /* Memory slot associated with the page */
+	const gfn_t gfn;                    /* Guest Frame Number */
+	unsigned long hva;                  /* Host Virtual Address */
 
-	unsigned long hva;
-
-	/* FOLL_* flags modifying lookup behavior, e.g. FOLL_WRITE. */
+	/* Flags modifying lookup behavior, e.g., FOLL_WRITE */
 	unsigned int flags;
 
 	/*
 	 * Pin the page (effectively FOLL_PIN, which is an mm/ internal flag).
 	 * The page *must* be pinned if KVM will write to the page via a kernel
-	 * mapping, e.g. via kmap(), mremap(), etc.
+	 * mapping, e.g., via kmap(), mremap(), etc.
 	 */
 	bool pin;
 
@@ -44,15 +45,16 @@ struct kvm_follow_pfn {
 	bool *map_writable;
 
 	/*
-	 * Optional output.  Set to a valid "struct page" if the returned pfn
+	 * Optional output. Set to a valid "struct page" if the returned pfn
 	 * is for a refcounted or pinned struct page, NULL if the returned pfn
 	 * has no struct page or if the struct page is not being refcounted
-	 * (e.g. tail pages of non-compound higher order allocations from
+	 * (e.g., tail pages of non-compound higher order allocations from
 	 * IO/PFNMAP mappings).
 	 */
 	struct page **refcounted_page;
 };
 
+/* Function to convert host virtual address to page frame number */
 kvm_pfn_t hva_to_pfn(struct kvm_follow_pfn *kfp);
 
 #ifdef CONFIG_HAVE_KVM_PFNCACHE
@@ -64,8 +66,9 @@ static inline void gfn_to_pfn_cache_invalidate_start(struct kvm *kvm,
 						     unsigned long start,
 						     unsigned long end)
 {
+	/* No operation if PFN cache is not available */
 }
-#endif /* HAVE_KVM_PFNCACHE */
+#endif /* CONFIG_HAVE_KVM_PFNCACHE */
 
 #ifdef CONFIG_KVM_PRIVATE_MEM
 void kvm_gmem_init(struct module *module);
@@ -76,20 +79,20 @@ void kvm_gmem_unbind(struct kvm_memory_slot *slot);
 #else
 static inline void kvm_gmem_init(struct module *module)
 {
-
+	/* No operation if private memory is not enabled */
 }
 
 static inline int kvm_gmem_bind(struct kvm *kvm,
 					 struct kvm_memory_slot *slot,
 					 unsigned int fd, loff_t offset)
 {
-	WARN_ON_ONCE(1);
-	return -EIO;
+	WARN_ON_ONCE(1); /* Warn if this function is called unexpectedly */
+	return -EIO; /* Input/output error */
 }
 
 static inline void kvm_gmem_unbind(struct kvm_memory_slot *slot)
 {
-	WARN_ON_ONCE(1);
+	WARN_ON_ONCE(1); /* Warn if this function is called unexpectedly */
 }
 #endif /* CONFIG_KVM_PRIVATE_MEM */
 
