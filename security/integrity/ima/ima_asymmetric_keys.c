@@ -15,13 +15,13 @@
 #include "ima.h"
 
 /**
- * ima_post_key_create_or_update - measure asymmetric keys
- * @keyring: keyring to which the key is linked to
- * @key: created or updated key
- * @payload: The data used to instantiate or update the key.
- * @payload_len: The length of @payload.
- * @flags: key flags
- * @create: flag indicating whether the key was created or updated
+ * ima_post_key_create_or_update - Measure asymmetric keys
+ * @keyring: Keyring to which the key is linked
+ * @key: Created or updated key
+ * @payload: The data used to instantiate or update the key
+ * @payload_len: The length of @payload
+ * @flags: Key flags
+ * @create: Flag indicating whether the key was created or updated
  *
  * Keys can only be measured, not appraised.
  * The payload data used to instantiate or update the key is measured.
@@ -33,33 +33,28 @@ void ima_post_key_create_or_update(struct key *keyring, struct key *key,
 	bool queued = false;
 
 	/* Only asymmetric keys are handled by this hook. */
-	if (key->type != &key_type_asymmetric)
+	if (key->type != &key_type_asymmetric) {
+		pr_debug("Ignoring non-asymmetric key type\n");
 		return;
+	}
 
-	if (!payload || (payload_len == 0))
+	/* Validate payload */
+	if (!payload || payload_len == 0) {
+		pr_err("Invalid payload for key measurement\n");
 		return;
+	}
 
-	if (ima_should_queue_key())
+	/* Check if the key should be queued for measurement */
+	if (ima_should_queue_key()) {
 		queued = ima_queue_key(keyring, payload, payload_len);
+		if (queued) {
+			pr_info("Key measurement queued for keyring: %s\n", keyring->description);
+			return;
+		}
+	}
 
-	if (queued)
-		return;
-
-	/*
-	 * keyring->description points to the name of the keyring
-	 * (such as ".builtin_trusted_keys", ".ima", etc.) to
-	 * which the given key is linked to.
-	 *
-	 * The name of the keyring is passed in the "eventname"
-	 * parameter to process_buffer_measurement() and is set
-	 * in the "eventname" field in ima_event_data for
-	 * the key measurement IMA event.
-	 *
-	 * The name of the keyring is also passed in the "keyring"
-	 * parameter to process_buffer_measurement() to check
-	 * if the IMA policy is configured to measure a key linked
-	 * to the given keyring.
-	 */
+	/* Measure the key */
+	pr_info("Measuring key for keyring: %s\n", keyring->description);
 	process_buffer_measurement(&nop_mnt_idmap, NULL, payload, payload_len,
 				   keyring->description, KEY_CHECK, 0,
 				   keyring->description, false, NULL, 0);
