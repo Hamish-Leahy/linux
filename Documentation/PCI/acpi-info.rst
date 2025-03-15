@@ -4,6 +4,8 @@
 ACPI considerations for PCI host bridges
 ========================================
 
+This document has not been adapted in this fork of Hamish Leahy's Version Of Linux
+
 The general rule is that the ACPI namespace should describe everything the
 OS might use unless there's another way for the OS to find it [1, 2].
 
