@@ -1,11 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
-/*
- *  Copyright (c) 1996-2000 Russell King.
- *
- *  Scan ADFS partitions on hard disk drives.  Unfortunately, there
- *  isn't a standard for partitioning drives on Acorn machines, so
- *  every single manufacturer of SCSI and IDE cards created their own
- *  method.
+
  */
 #include <linux/buffer_head.h>
 #include <linux/adfs_fs.h>
