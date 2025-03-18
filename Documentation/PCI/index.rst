@@ -9,7 +9,7 @@ PCI Bus Subsystem
    :numbered:
 
    pci
-   pciebus-howto
+   pciebus-how
    pci-iov-howto
    msi-howto
    sysfs-pci
